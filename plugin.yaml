@@ -1,0 +1,39 @@
+manifest_version: 2
+name: mcp-plugin-creator
+label: MCP Plugin Creator
+kind: standalone
+version: 0.2.0
+author: tonbistudio
+license: MIT
+homepage: https://github.com/tonbistudio/hermes-mcp-plugin-creator
+requires_hermes: ">=0.22.0"
+tags: [mcp, plugins, skills, developer-tools]
+description: >
+  Turn any MCP server into a Hermes plugin: introspects the server, mines this profile's past
+  sessions for how the server is actually used, converts its config, and scaffolds a portable Agent
+  Plugin (plugin.json + mcp.json + workflow skill) that validates with Hermes and installs in linked
+  mode. Includes drift and review checks for refreshing a generated plugin, a /mcp-creator command
+  and a `hermes mcp-creator` CLI. Disclosure: introspection and drift checks start the target MCP
+  server's command (or connect to its URL); session mining reads this profile's state.db read-only;
+  a post_tool_call hook appends redacted mcp__* call summaries to a local log under this plugin's
+  data dir (setting log_calls: false turns it off; nothing leaves the machine); install creates a
+  directory link in the profile's plugins dir and runs `hermes plugins enable`. Inline server
+  launches, writes outside the data dir and installs ask for approval first.
+provides_tools:
+  - mcp_creator_servers
+  - mcp_creator_introspect
+  - mcp_creator_mine
+  - mcp_creator_convert
+  - mcp_creator_scaffold
+  - mcp_creator_validate
+  - mcp_creator_install
+  - mcp_creator_drift
+  - mcp_creator_review
+provides_hooks:
+  - post_tool_call
+  - pre_tool_call
+config_schema:
+  log_calls:
+    type: bool
+    default: true
+    description: Record mcp__* tool calls (redacted, local only) to the plugin data dir for usage mining
