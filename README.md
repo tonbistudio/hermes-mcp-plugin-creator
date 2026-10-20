@@ -109,7 +109,7 @@ caught one harmful rule before release.
 ```bash
 # from the repo root, with Hermes' Python and pytest available
 python -m pytest tests -q -o addopts=
-hermes plugins validate .
+hermes plugins validate . --install-deps
 ```
 
 The tests start a tiny stdio MCP server (`tests/fake_server.py`) in a temporary `HERMES_HOME`.

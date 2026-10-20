@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .common import hermes_home
+from .common import PLUGIN_NAME_RE, hermes_home
 from .scaffold import read_configured_servers
 
 
@@ -67,7 +67,11 @@ def conflicts(server_names: list[str], plugin_name: str | None = None) -> dict:
 
 def link(root: str, plugin_name: str, *, replace: bool = False) -> dict:
     """Junction (Windows) / symlink the build into <HERMES_HOME>/plugins/<name> — linked dev mode."""
+    if not PLUGIN_NAME_RE.fullmatch(plugin_name or "") or len(plugin_name) > 64:
+        return {"success": False, "error": f"invalid plugin name {plugin_name!r}"}
     src = Path(root).resolve()
+    if not (src / "plugin.json").is_file():
+        return {"success": False, "error": f"{src} has no plugin.json; not a package"}
     dest = hermes_home() / "plugins" / plugin_name
     if dest.exists() or dest.is_symlink() or _is_junction(dest):
         if _is_junction(dest) or dest.is_symlink():
@@ -98,6 +102,8 @@ def enable(plugin_name: str) -> dict:
 
 
 def unlink(plugin_name: str) -> dict:
+    if not PLUGIN_NAME_RE.fullmatch(plugin_name or "") or len(plugin_name) > 64:
+        return {"success": False, "error": f"invalid plugin name {plugin_name!r}"}
     dest = hermes_home() / "plugins" / plugin_name
     if not (_is_junction(dest) or dest.is_symlink()):
         return {"success": False, "error": f"{dest} is not an mcp-plugin-creator link; not touching it"}

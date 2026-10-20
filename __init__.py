@@ -72,7 +72,9 @@ def _approval_gate(tool_name=None, args=None, **_kwargs):
     elif tool_name == "mcp_creator_review" and args.get("plugin") and args.get("probe", True) is not False:
         reason = f"start the MCP server(s) of the built plugin {args['plugin']!r} to check for drift"
     elif tool_name == "mcp_creator_scaffold" and args.get("output_dir"):
-        reason = f"write a plugin package to {args['output_dir']}"
+        reason = (f"write a plugin package to {args['output_dir']} (if that folder holds an earlier "
+                  f"mcp-plugin-creator build, its contents are replaced; any other non-empty folder "
+                  f"is refused)")
     elif tool_name == "mcp_creator_install":
         reason = (f"link {args.get('root')} into this profile's plugins dir as "
                   f"{args.get('plugin_name')!r}" + (" and enable it" if args.get("enable", True) else ""))

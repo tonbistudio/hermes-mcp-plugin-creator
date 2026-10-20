@@ -1,7 +1,7 @@
 ---
 name: mcp-plugin-creator
 description: "Use when turning an MCP server into a Hermes plugin (MCP config + workflow skill), migrating a config.yaml mcp_servers entry into a package, or refreshing a generated plugin after the server changed. Evidence-first: server self-description, past sessions, docs, then a verification probe."
-version: 0.2.0
+version: 0.2.1
 author: tonbistudio
 license: MIT
 ---

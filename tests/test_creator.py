@@ -122,3 +122,85 @@ def test_redact_strips_secrets():
     text = "token ghp_abcdefghijklmnopqrstuvwxyz123456 and Bearer abcdefghijklmnopqrstuvwxyz"
     out = redact(text, paths=False)
     assert "ghp_" not in out and "abcdefghijklmnopqrstuvwxyz" not in out
+
+
+# --------------------------------------------------------------------------- review fixes (PR #141915)
+
+def _pkg_args(tmp_path, **kw):
+    a = {"plugin_name": "fake-notes", "description": "Test package.",
+         "servers": {"notes": {"type": "stdio", "command": "uvx", "args": ["fake-notes-mcp==1.0.0"]}},
+         "skills": [{"name": "fake-notes", "skill_md": SKILL}]}
+    a.update(kw)
+    return a
+
+
+@pytest.mark.parametrize("build", ["local/../../../../escape", "../x", "publish/..", "", "LOCAL", "x"])
+def test_build_outside_enum_is_rejected(creator, tmp_path, build):
+    from core.common import data_dir
+    res = json.loads(creator.h_scaffold(_pkg_args(tmp_path, build=build or "nope")))
+    assert not res["success"] and "build must be one of" in res["errors"][0]
+    assert not any(data_dir("builds").parent.parent.rglob("escape*"))
+
+
+def test_default_root_stays_inside_builds_dir(creator, tmp_path):
+    from core.common import data_dir
+    res = json.loads(creator.h_scaffold(_pkg_args(tmp_path)))
+    assert res["success"], res
+    assert Path(res["root"]).resolve().parent == data_dir("builds").resolve()
+
+
+def test_relative_or_root_output_dir_is_refused(creator, tmp_path):
+    for bad in ("relative/dir", str(Path(tmp_path.anchor))):
+        res = json.loads(creator.h_scaffold(_pkg_args(tmp_path, output_dir=bad)))
+        assert not res["success"], bad
+
+
+def test_foreign_non_empty_folder_is_never_emptied(creator, tmp_path):
+    target = tmp_path / "users-folder"
+    target.mkdir()
+    (target / "precious.txt").write_text("keep me")
+    (target / "sub").mkdir()
+    (target / "sub" / "also.txt").write_text("keep me too")
+    res = json.loads(creator.h_scaffold(_pkg_args(tmp_path, output_dir=str(target))))
+    assert not res["success"] and "refusing to replace" in res["errors"][0]
+    assert (target / "precious.txt").read_text() == "keep me"
+    assert (target / "sub" / "also.txt").is_file()
+
+
+def test_own_previous_build_is_replaced(creator, tmp_path):
+    target = tmp_path / "pkg"
+    first = json.loads(creator.h_scaffold(_pkg_args(tmp_path, output_dir=str(target))))
+    assert first["success"], first
+    (target / "stale.md").write_text("old")
+    second = json.loads(creator.h_scaffold(_pkg_args(tmp_path, output_dir=str(target))))
+    assert second["success"], second
+    assert not (target / "stale.md").exists() and (target / "plugin.json").is_file()
+
+
+def test_empty_existing_folder_is_used(creator, tmp_path):
+    target = tmp_path / "empty"
+    target.mkdir()
+    assert json.loads(creator.h_scaffold(_pkg_args(tmp_path, output_dir=str(target))))["success"]
+
+
+def test_scaffold_works_without_pyyaml(creator, tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "yaml", None)  # import yaml -> ImportError, like a stock install
+    res = json.loads(creator.h_scaffold(_pkg_args(tmp_path, output_dir=str(tmp_path / "noyaml"))))
+    assert res["success"], res
+
+
+def test_install_rejects_path_like_plugin_names(creator, tmp_path):
+    from core import install
+    pkg = json.loads(creator.h_scaffold(_pkg_args(tmp_path, output_dir=str(tmp_path / "p"))))["root"]
+    for bad in ("../escape", "a/b", "..", "UPPER", ""):
+        assert not install.link(pkg, bad)["success"], bad
+        assert not install.unlink(bad)["success"], bad
+
+
+def test_approval_message_names_replacement():
+    sys.path.insert(0, str(REPO.parent))
+    import importlib
+    gate = importlib.import_module(REPO.name)._approval_gate
+    sys.path.remove(str(REPO.parent))
+    msg = gate("mcp_creator_scaffold", {"output_dir": "/tmp/x"})["message"]
+    assert "replaced" in msg and "/tmp/x" in msg

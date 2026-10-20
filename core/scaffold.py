@@ -13,11 +13,14 @@ from pathlib import Path
 from typing import Any
 
 from .common import (PLUGIN_NAME_RE, SECRET_KEY_HINT, SERVER_NAME_RE, SKILL_NAME_RE, VAR_REF_RE,
-                     data_dir, hermes_home, scan_for_private_data)
+                     data_dir, hermes_home, safe_filename, scan_for_private_data)
 
 PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 HERMES_EXT = "com.nousresearch.hermes"
+BUILDS = {"local", "publish"}
+# Written into every package root. Only a folder holding it may be emptied on rebuild.
+MARKER = ".mcp-plugin-creator"
 
 # Hermes adds these utility tools to every MCP server; they are not the server's own surface.
 HERMES_UTILITY_TOOLS = {"list_resources", "read_resource", "list_prompts", "get_prompt"}
@@ -40,9 +43,8 @@ def read_configured_servers() -> dict[str, dict]:
         from hermes_cli.config import load_config_readonly
         cfg = load_config_readonly() or {}
     except Exception:
-        import yaml
         path = hermes_home() / "config.yaml"
-        cfg = yaml.safe_load(path.read_text(encoding="utf-8-sig")) if path.is_file() else {}
+        cfg = _yaml_load(path.read_text(encoding="utf-8-sig")) if path.is_file() else {}
     servers = cfg.get("mcp_servers") or {}
     return {k: dict(v) for k, v in servers.items() if isinstance(v, dict)}
 
@@ -157,6 +159,8 @@ def write_package(
     """
     errors: list[str] = []
     warnings: list[str] = []
+    if build not in BUILDS:
+        return {"success": False, "errors": [f"build must be one of {sorted(BUILDS)}, got {build!r}"]}
     if not PLUGIN_NAME_RE.fullmatch(plugin_name or "") or len(plugin_name) > 64:
         errors.append(f"plugin name {plugin_name!r} must be lowercase a-z0-9 with . or - separators")
     if not servers:
@@ -195,12 +199,22 @@ def write_package(
     if errors:
         return {"success": False, "errors": errors, "warnings": warnings}
 
-    root = Path(output_dir) if output_dir else default_output_root() / f"{plugin_name}-{build}"
+    root, problem = resolve_root(plugin_name, build, output_dir)
+    if problem:
+        return {"success": False, "errors": [problem]}
     if root.exists():
-        if not overwrite:
-            return {"success": False, "errors": [f"{root} exists (overwrite=false)"]}
-        _clear_package(root)
+        if not root.is_dir() or root.is_symlink():
+            return {"success": False, "errors": [f"{root} exists and is not a plain directory; refusing"]}
+        if any(root.iterdir()):
+            if not (root / MARKER).is_file():
+                return {"success": False, "errors": [
+                    f"{root} is not empty and was not created by mcp-plugin-creator (no {MARKER}); "
+                    "refusing to replace its contents. Choose an empty or new folder."]}
+            if not overwrite:
+                return {"success": False, "errors": [f"{root} exists (overwrite=false)"]}
+            _clear_package(root)
     root.mkdir(parents=True, exist_ok=True)
+    _write(root / MARKER, json.dumps({"plugin": plugin_name, "build": build}) + "\n")
 
     manifest: dict[str, Any] = {"$schema": PLUGIN_SCHEMA, "name": plugin_name, "version": version,
                                 "description": description}
@@ -241,7 +255,7 @@ def write_package(
     record = {"plugin": plugin_name, "build": build, "root": str(root), "version": version,
               "written_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "files": written,
               "servers": list(servers), "provenance": provenance or {}}
-    (data_dir("builds") / f"{plugin_name}-{build}.creator.json").write_text(
+    (data_dir("builds") / f"{safe_filename(plugin_name)}-{build}.creator.json").write_text(
         json.dumps(record, indent=2), encoding="utf-8")
 
     private = scan_package(root)
@@ -252,6 +266,29 @@ def write_package(
         result["errors"] = [f"publish build contains {len(private)} private-data finding(s); "
                             "generalize or remove them, then rebuild"]
     return result
+
+
+def resolve_root(plugin_name: str, build: str, output_dir: str | None) -> tuple[Path, str | None]:
+    """Final package root, refused unless it is inside the builds dir or is the given output_dir.
+
+    ``plugin_name`` and ``build`` are already validated; the check still resolves the path, so a
+    future caller can't escape through either.
+    """
+    builds = default_output_root().resolve()
+    if output_dir:
+        given = Path(output_dir)
+        if not given.is_absolute():
+            return given, f"output_dir must be an absolute path, got {output_dir!r}"
+        root = given.resolve()
+        if root.parent == root:
+            return root, f"output_dir {output_dir!r} is a filesystem root; refusing"
+        if root in (hermes_home().resolve(), Path.home().resolve()):
+            return root, f"output_dir {output_dir!r} is a home directory; refusing"
+        return root, None
+    root = (builds / f"{plugin_name}-{build}").resolve()
+    if root.parent != builds:
+        return root, f"package root {root} escapes {builds}; refusing"
+    return root, None
 
 
 def scan_package(root: Path) -> list[dict]:
@@ -271,16 +308,21 @@ def _frontmatter_value(md: str, key: str) -> str | None:
     if end < 0:
         return None
     try:
-        import yaml
-        data = yaml.safe_load(md[3:end]) or {}
-        v = data.get(key)
-        return v if isinstance(v, str) else None
-    except Exception:
+        data = _yaml_load(md[3:end]) or {}
+    except Exception:  # malformed frontmatter is reported by the caller as a missing value
         return None
+    v = data.get(key) if isinstance(data, dict) else None
+    return v if isinstance(v, str) else None
+
+
+def _yaml_load(text: str) -> Any:
+    """YAML via Hermes' public loader (core since 0.22.0); PyYAML is not a Hermes dependency."""
+    from hermes_yaml import safe_load
+    return safe_load(text)
 
 
 def _clear_package(root: Path) -> None:
-    """Remove generated content but never follow links out of the package."""
+    """Remove a previous build's content. Callers check for MARKER first; links are never followed."""
     for child in root.iterdir():
         if child.is_symlink():
             child.unlink()

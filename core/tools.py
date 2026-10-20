@@ -103,7 +103,7 @@ def h_scaffold(args: dict, **_: Any) -> str:
         output_dir=args.get("output_dir"), author=args.get("author"), homepage=args.get("homepage"),
         license=args.get("license", "MIT"), keywords=args.get("keywords"),
         hermes_servers=args.get("hermes_servers"), readme=args.get("readme"),
-        build=args.get("build") or "local", provenance=args.get("provenance"),
+        build=str(args.get("build") or "local"), provenance=args.get("provenance"),
     )
     if res.get("success") and args.get("baseline_server"):
         snap = introspect.load_snapshot(args["baseline_server"])

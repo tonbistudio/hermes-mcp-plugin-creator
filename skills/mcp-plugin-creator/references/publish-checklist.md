@@ -14,5 +14,14 @@ A publish build is what goes to a public repo or the plugin catalog.
 - [ ] `hermes plugins validate <root>` passes; `mcp_creator_validate` loader diagnostics empty.
 - [ ] README: what it does, install (`hermes plugins install owner/repo`, then `enable`, then new
       session), prerequisites, verification, license.
+- [ ] **Adversarial pass on any code the package ships** (scripts, a native half):
+      - Treat every tool argument as untrusted. Schema `enum`s and patterns are not enforced;
+        call each tool with hostile values (`../`, absolute paths, empty strings, wrong types).
+      - List every destructive operation (`rmtree`, `unlink`, overwrites, writes outside the data
+        dir). Each one needs a check that it only touches what the plugin created, or an
+        approval whose message says exactly what will be replaced.
+      - Check every import against what Hermes actually declares, and run the tests with
+        undeclared packages blocked (`sys.modules["yaml"] = None`). A dev environment that
+        happens to have a package installed hides the bug; a broad `except` hides it twice.
 - [ ] Catalog entry (if submitting): pinned `sha`, `subdir`, `docs_url`, platforms, tier
       `community`; follow the catalog submission guide; an entry PR touches only `plugin-catalog/`.
