@@ -204,3 +204,17 @@ def test_approval_message_names_replacement():
     sys.path.remove(str(REPO.parent))
     msg = gate("mcp_creator_scaffold", {"output_dir": "/tmp/x"})["message"]
     assert "replaced" in msg and "/tmp/x" in msg
+
+
+@pytest.mark.parametrize("fm,expected", [
+    ('description: "Use when x: y"', "Use when x: y"),
+    ("description: 'Use when it''s x'", "Use when it's x"),
+    ("description: Use when x # comment", "Use when x"),
+    ("description: >\n  Use when x\n  and y\nversion: 1", "Use when x and y"),
+    ("version: 1", None),
+])
+def test_frontmatter_parser(fm, expected):
+    sys.path.insert(0, str(REPO))
+    from core.scaffold import _frontmatter_value
+    sys.path.remove(str(REPO))
+    assert _frontmatter_value(f"---\nname: a\n{fm}\n---\n# A\n", "description") == expected

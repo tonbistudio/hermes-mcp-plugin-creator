@@ -42,9 +42,8 @@ def read_configured_servers() -> dict[str, dict]:
     try:
         from hermes_cli.config import load_config_readonly
         cfg = load_config_readonly() or {}
-    except Exception:
-        path = hermes_home() / "config.yaml"
-        cfg = _yaml_load(path.read_text(encoding="utf-8-sig")) if path.is_file() else {}
+    except Exception:  # outside Hermes (tests): no config to read
+        cfg = {}
     servers = cfg.get("mcp_servers") or {}
     return {k: dict(v) for k, v in servers.items() if isinstance(v, dict)}
 
@@ -307,18 +306,40 @@ def _frontmatter_value(md: str, key: str) -> str | None:
     end = md.find("\n---", 3)
     if end < 0:
         return None
-    try:
-        data = _yaml_load(md[3:end]) or {}
-    except Exception:  # malformed frontmatter is reported by the caller as a missing value
-        return None
-    v = data.get(key) if isinstance(data, dict) else None
-    return v if isinstance(v, str) else None
+    return _frontmatter_scalar(md[3:end], key)
 
 
-def _yaml_load(text: str) -> Any:
-    """YAML via Hermes' public loader (core since 0.22.0); PyYAML is not a Hermes dependency."""
-    from hermes_yaml import safe_load
-    return safe_load(text)
+def _frontmatter_scalar(block: str, key: str) -> str | None:
+    """Read one top-level scalar from YAML frontmatter, stdlib only.
+
+    Handles the forms SKILL.md uses for name/description: plain, single- or double-quoted, and
+    folded/literal blocks (``>``, ``|``). No YAML library: PyYAML is not a Hermes dependency and
+    Hermes' own loaders are not public plugin API.
+    """
+    lines = block.splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(rf"^{re.escape(key)}:\s*(.*)$", line)
+        if not m:
+            continue
+        raw = m.group(1).strip()
+        if raw[:1] in (">", "|"):
+            body = []
+            for nxt in lines[i + 1:]:
+                if nxt.strip() and not nxt[:1].isspace():
+                    break
+                body.append(nxt.strip())
+            sep = " " if raw[0] == ">" else "\n"
+            return sep.join(b for b in body if b) or None
+        if len(raw) >= 2 and raw[0] == raw[-1] == '"':
+            try:
+                return json.loads(raw)
+            except ValueError:
+                return raw[1:-1]
+        if len(raw) >= 2 and raw[0] == raw[-1] == "'":
+            return raw[1:-1].replace("''", "'")
+        raw = re.sub(r"\s+#.*$", "", raw)
+        return raw or None
+    return None
 
 
 def _clear_package(root: Path) -> None:
